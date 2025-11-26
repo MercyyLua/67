@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lua Obfuscator — Static GitHub Pages</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--muted:#94a3b8;--accent:#7c3aed}
+    html,body{height:100%}
+    body{margin:0;background:linear-gradient(180deg,#071326 0%,#061024 100%);font-family:Inter,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial;color:#e6eef8}
+    .wrap{max-width:980px;margin:28px auto;padding:20px}
+    header{display:flex;align-items:center;gap:16px}
+    h1{margin:0;font-size:20px}
+    .card{background:rgba(255,255,255,0.02);border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
+    textarea{width:100%;min-height:260px;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+    .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .btn{background:var(--accent);border:none;padding:10px 14px;border-radius:8px;color:white;cursor:pointer}
+    .btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.06)}
+    label{display:inline-flex;gap:8px;align-items:center}
+    .row{display:flex;gap:12px}
+    .options{display:flex;gap:12px;align-items:center}
+    .output{margin-top:12px}
+    pre{white-space:pre-wrap;background:rgba(0,0,0,0.15);padding:12px;border-radius:8px;overflow:auto}
+    footer{margin-top:18px;color:var(--muted);font-size:13px}
+    .small{font-size:13px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="card" style="padding:12px;display:flex;align-items:center;gap:12px">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="24" height="24" rx="6" fill="#0b1220" stroke="#2b6cf6"/><path d="M7 8h10M7 12h10M7 16h6" stroke="#9ad0ff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <h1>Lua Obfuscator (Static — GitHub Pages)</h1>
+      </div>
+    </header>
+
+    <section style="margin-top:14px" class="card">
+      <div>
+        <div class="small">Paste your Lua code below and pick an obfuscation mode. This tool runs entirely in your browser — nothing is uploaded.</div>
+        <div style="margin-top:10px">
+          <textarea id="input" placeholder="-- paste lua code here...">-- Example:
+print('hello world')
+local function add(a,b) return a+b end
+print(add(3,4))</textarea>
+        </div>
+
+        <div class="controls">
+          <div class="options">
+            <label><input type="checkbox" id="minify" checked/> Minify (remove comments & extra whitespace)</label>
+            <label><input type="checkbox" id="base64" checked/> Wrap as base64-encoded loader (strong obfuscation)</label>
+            <label title="Add a tiny random cookie so output changes each time"><input type="checkbox" id="randomize"/> Randomize wrapper</label>
+          </div>
+
+          <div style="margin-left:auto" class="row">
+            <button class="btn" id="obfBtn">Obfuscate</button>
+            <button class="btn secondary" id="clearBtn">Clear</button>
+          </div>
+        </div>
+
+        <div class="output">
+          <div class="small">Result</div>
+          <pre id="result">(obfuscated output will appear here)</pre>
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <button class="btn" id="copyBtn">Copy</button>
+            <button class="btn secondary" id="downloadBtn">Download .lua</button>
+            <button class="btn secondary" id="previewBtn">Open in new tab</button>
+          </div>
+        </div>
+
+        <footer>
+          <div>How it works: when you choose base64 wrapper, your script is first optionally minified then base64-encoded and embedded in a small Lua loader that decodes and runs it. This is a convenient single-file obfuscation method that runs locally.</div>
+        </footer>
+      </div>
+    </section>
+
+  </div>
+
+<script>
+// Helpers
+function escapeHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+function minifyLua(code){
+  // remove long block comments --[[ ... ]]
+  code = code.replace(/\-\-\[\[[\s\S]*?\]\]/g, '');
+  // remove single-line comments -- ...
+  code = code.replace(/\-\-[^\n]*$/mg, '');
+  // collapse multiple blank lines and trim spaces at line ends
+  code = code.split('\n').map(l=>l.replace(/\s+$/,'')).filter((l,i,arr)=>{ return !(l.trim()==='' && (i===0 || arr[i-1].trim()==='')); }).join('\n');
+  // collapse unnecessary whitespace
+  code = code.replace(/\t/g,' ');
+  code = code.replace(/ {2,}/g,' ');
+  return code.trim();
+}
+
+function toBase64Unicode(str){ // safe base64 for unicode
+  // btoa(unescape(encodeURIComponent(str))) works in browsers
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
+function makeLuaBase64Loader(b64, opts){
+  const rand = opts.randomize ? Math.floor(Math.random()*1e9) : 0;
+  // Simple Lua base64 decoder (self-contained)
+  const loader = `-- Generated by Lua Obfuscator\nlocal _b='${b64}'\nlocal function dec(s)
+  local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  s = s:gsub('[^'..b..'=]','')
+  return s:gsub('.', function(x)
+    if x=='=' then return '' end
+    local r = b:find(x)-1
+    local t = ''
+    for i=6,1,-1 do t = t .. (r%2==1 and '1' or '0'); r = math.floor(r/2) end
+    return t
+  end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
+    if #x < 8 then return '' end
+    local n = 0
+    for i=1,8 do n = n*2 + (x:sub(i,i)=='1' and 1 or 0) end
+    return string.char(n)
+  end)
+end
+local _s = dec(_b)
+-- optional random value to change fingerprint: ${rand}
+local f,err = load(_s)
+if not f then error('load error: '..(err or '')) end
+return f()\n`;
+  return loader;
+}
+
+// UI wiring
+const inputEl = document.getElementById('input');
+const obfBtn = document.getElementById('obfBtn');
+const resultEl = document.getElementById('result');
+const copyBtn = document.getElementById('copyBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const clearBtn = document.getElementById('clearBtn');
+const previewBtn = document.getElementById('previewBtn');
+
+obfBtn.addEventListener('click', ()=>{
+  let src = inputEl.value || '';
+  if(!src.trim()){ resultEl.textContent = '(no input)'; return }
+  const doMin = document.getElementById('minify').checked;
+  const doB64 = document.getElementById('base64').checked;
+  const randomize = document.getElementById('randomize').checked;
+
+  if(doMin) src = minifyLua(src);
+
+  if(doB64){
+    const b64 = toBase64Unicode(src);
+    const out = makeLuaBase64Loader(b64,{randomize});
+    resultEl.textContent = out;
+  } else {
+    // simple obfuscation only: base64 not selected -> output minified or original
+    resultEl.textContent = src;
+  }
+});
+
+copyBtn.addEventListener('click', ()=>{
+  const txt = resultEl.textContent || '';
+  navigator.clipboard.writeText(txt).then(()=>{ copyBtn.textContent='Copied ✓'; setTimeout(()=>copyBtn.textContent='Copy',1200); });
+});
+
+downloadBtn.addEventListener('click', ()=>{
+  const txt = resultEl.textContent || '';
+  const blob = new Blob([txt],{type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'obfuscated.lua'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+});
+
+clearBtn.addEventListener('click', ()=>{ inputEl.value=''; resultEl.textContent='(obfuscated output will appear here)'; });
+
+previewBtn.addEventListener('click', ()=>{
+  const txt = resultEl.textContent || '';
+  const blob = new Blob([txt],{type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  window.open(url,'_blank');
+  setTimeout(()=>URL.revokeObjectURL(url),5000);
+});
+
+// Drag & drop file load
+document.addEventListener('dragover', e=>e.preventDefault());
+document.addEventListener('drop', e=>{ e.preventDefault(); if(e.dataTransfer.files && e.dataTransfer.files[0]){
+  const f = e.dataTransfer.files[0]; const reader = new FileReader(); reader.onload = ev=>{ inputEl.value = ev.target.result; }; reader.readAsText(f);
+}});
+
+</script>
+</body>
+</html>
